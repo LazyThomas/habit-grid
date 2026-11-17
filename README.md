@@ -11,5 +11,8 @@ Open the published site in Safari, tap **Share → Add to Home Screen**.
 ## Data and sync
 This deployed version currently stores checkmarks locally on each device. It does **not** sync between iPhone and Mac yet. The previous v1.1 ZIP contains an optional Supabase sync client, which still needs cloud-project/database configuration and deployment. Never commit service-role keys or passwords. Clearing local browser data may erase your habits.
 
+## Tabs
+Habits (monthly grid), Body (height, weight, waist, sleep, BMI, goals), Nutrition (calories, protein, fiber vs editable targets), Exercise (cardio log, custom routines, live workout tracker with rest timer, history, records). Logged numbers can auto-check linked ⚡ habits. Drive sync covers all of it.
+
 ## Scope
 Monthly grid, touch checkmarks, add/edit/delete habits, month navigation, and completion totals. Yearly overview is intentionally deferred.

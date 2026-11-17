@@ -10,20 +10,44 @@ status.before(bar);
 const login=document.getElementById("google-connect"),logout=document.getElementById("google-disconnect"),state=document.getElementById("google-state");
 let token="",tokenExpiry=0,client=null,busy=false,queued=false,folderId="",fileId="";
 const deviceKey="habitgrid.device.v1";let device=localStorage.getItem(deviceKey);if(!device){device=crypto.randomUUID();localStorage.setItem(deviceKey,device)}
-let syncState;try{syncState=JSON.parse(localStorage.getItem(KEY))||{habits:{},checks:{}}}catch{syncState={habits:{},checks:{}}}
-syncState.habits ||= {};syncState.checks ||= {};syncState.metrics ||= {};syncState.links ||= {};
+// Record types. Each synced value is {v,t,d}: value, timestamp, device. Newest timestamp wins.
+// habits: name | checks: bool | metrics: number | blobs: JSON string (null = deleted)
+const BLOBS=["links","settings","routines","exercises","workouts"];
+const TYPES=["habits","checks","metrics",...BLOBS];
+let syncState;try{syncState=JSON.parse(localStorage.getItem(KEY))||{}}catch{syncState={}}
+for(const t of TYPES)syncState[t] ||= {};
 const record=(v,t=1,d=device)=>({v,t,d});
-function read(){try{const x=JSON.parse(localStorage.getItem(LOCAL))||{};return{habits:x.habits||[],checks:x.checks||{},metrics:x.metrics||{},links:x.links||{}}}catch{return{habits:[],checks:{},metrics:{},links:{}}}}
-const ser=l=>l?JSON.stringify(l):null;
-function initialize(){const x=read();for(const h of x.habits||[])syncState.habits[h.id] ||=record(h.name);for(const [k,v] of Object.entries(x.checks||{}))syncState.checks[k] ||=record(!!v);for(const [k,v] of Object.entries(x.metrics))if(typeof v==="number")syncState.metrics[k] ||=record(v);for(const [k,v] of Object.entries(x.links))syncState.links[k] ||=record(ser(v))}
+const ser=v=>v===undefined||v===null?null:JSON.stringify(v);
+function read(){let x={};try{x=JSON.parse(localStorage.getItem(LOCAL))||{}}catch{}
+  const out={habits:Array.isArray(x.habits)?x.habits:[],checks:x.checks||{},metrics:x.metrics||{}};for(const b of BLOBS)out[b]=x[b]||{};return out}
+// Current local value for one record, in the same encoding the record uses.
+function localValue(type,key,x){
+  if(type==="habits")return (x.habits.find(h=>h.id===key)||{}).name??null;
+  if(type==="checks")return !!x.checks[key];
+  if(type==="metrics")return typeof x.metrics[key]==="number"?x.metrics[key]:null;
+  return ser(x[type][key])}
+function localKeys(type,x){
+  if(type==="habits")return x.habits.map(h=>h.id);
+  return Object.keys(x[type])}
+function initialize(){const x=read();for(const t of TYPES)for(const k of localKeys(t,x)){const v=localValue(t,k,x);if(v!==null&&!syncState[t][k])syncState[t][k]=record(v)}}
 initialize();
 function persist(){localStorage.setItem(KEY,JSON.stringify(syncState))}
 persist();
-function reflect(){const habits=Object.entries(syncState.habits).filter(([,r])=>r.v!==null).sort(([a,ra],[b,rb])=>a.localeCompare(b)).map(([id,r])=>({id,name:r.v}));const checks={};for(const [k,r] of Object.entries(syncState.checks))if(r.v===true)checks[k]=true;const metrics={};for(const [k,r] of Object.entries(syncState.metrics))if(typeof r.v==="number")metrics[k]=r.v;const links={};for(const [k,r] of Object.entries(syncState.links))if(typeof r.v==="string"){try{links[k]=JSON.parse(r.v)}catch{}}window.HabitGridApply?.({habits,checks,metrics,links})}
+function reflect(){
+  const habits=Object.entries(syncState.habits).filter(([,r])=>r.v!==null).sort(([a],[b])=>a.localeCompare(b)).map(([id,r])=>({id,name:r.v}));
+  const checks={};for(const [k,r] of Object.entries(syncState.checks))if(r.v===true)checks[k]=true;
+  const metrics={};for(const [k,r] of Object.entries(syncState.metrics))if(typeof r.v==="number")metrics[k]=r.v;
+  const next={habits,checks,metrics};
+  for(const b of BLOBS){next[b]={};for(const [k,r] of Object.entries(syncState[b]))if(typeof r.v==="string"){try{next[b][k]=JSON.parse(r.v)}catch{}}}
+  window.HabitGridApply?.(next)}
 function stamp(){return Date.now()}
-function updateFromLocal(){const x=read();const current=new Map((x.habits||[]).map(h=>[h.id,h.name]));for(const [id,name] of current){if(syncState.habits[id]?.v!==name)syncState.habits[id]=record(name,stamp())}for(const [id,r] of Object.entries(syncState.habits))if(r.v!==null&&!current.has(id))syncState.habits[id]=record(null,stamp());const keys=new Set([...Object.keys(syncState.checks),...Object.keys(x.checks||{})]);for(const k of keys){const value=!!x.checks[k];if(syncState.checks[k]?.v!==value)syncState.checks[k]=record(value,stamp())}const mkeys=new Set([...Object.keys(syncState.metrics),...Object.keys(x.metrics)]);for(const k of mkeys){const value=typeof x.metrics[k]==="number"?x.metrics[k]:null;if(syncState.metrics[k]?.v!==value&&!(value===null&&!syncState.metrics[k]))syncState.metrics[k]=record(value,stamp())}const lkeys=new Set([...Object.keys(syncState.links),...Object.keys(x.links)]);for(const k of lkeys){const value=ser(x.links[k]);if(syncState.links[k]?.v!==value&&!(value===null&&!syncState.links[k]))syncState.links[k]=record(value,stamp())}persist()}
+function updateFromLocal(){const x=read();
+  for(const t of TYPES){const keys=new Set([...Object.keys(syncState[t]),...localKeys(t,x)]);
+    for(const k of keys){const value=localValue(t,k,x),old=syncState[t][k];
+      if(old?.v!==value&&!(value===null&&!old))syncState[t][k]=record(value,stamp())}}
+  persist()}
 window.addEventListener("habitgrid:change",()=>{updateFromLocal();schedule()});
-function combine(remote){for(const type of ["habits","checks","metrics","links"]){for(const [k,r] of Object.entries(remote?.[type]||{})){if(!r||typeof r.t!=="number")continue;const old=syncState[type][k];if(!old||r.t>old.t||(r.t===old.t&&String(r.d)>String(old.d)))syncState[type][k]=r}}}
+function combine(remote){for(const type of TYPES){for(const [k,r] of Object.entries(remote?.[type]||{})){if(!r||typeof r.t!=="number")continue;const old=syncState[type][k];if(!old||r.t>old.t||(r.t===old.t&&String(r.d)>String(old.d)))syncState[type][k]=r}}}
 async function api(url,options={}){const response=await fetch(url,{...options,headers:{Authorization:"Bearer "+token,...(options.headers||{})}});if(response.status===401){token="";show("Session expired. Connect again.");throw Error("Google sign-in expired")}if(!response.ok)throw Error("Google Drive "+response.status+": "+(await response.text()).slice(0,180));if(response.status===204)return null;return response.json()}
 const quoted=s=>s.replace(/'/g,"\\'");
 async function find(name,mime,parent){let q="name = '"+quoted(name)+"' and trashed = false";if(mime)q+=" and mimeType = '"+mime+"'";if(parent)q+=" and '"+parent+"' in parents";const res=await api(BASE+"/files?fields=nextPageToken,files(id,name,mimeType)&page_size=100&q="+encodeURIComponent(q));return res.files?.[0]||null}
