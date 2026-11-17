@@ -226,15 +226,24 @@ setInterval(tickClock, 1000);
 
 /* ---------- Exercise picker ---------- */
 let pickCb = null;
+const GROUPS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Full Body", "Cardio", "Custom"];
+let pickGroup = "All";
 function renderPick() {
   const q = $("pickq").value.trim().toLowerCase();
-  const list = allEx().filter(e => !q || e.name.toLowerCase().includes(q) || e.group.toLowerCase().includes(q)).slice(0, 80);
+  const pool = allEx().filter(e => (pickGroup === "All" || e.group === pickGroup) && (!q || e.name.toLowerCase().includes(q)));
+  const present = GROUPS.filter(g => allEx().some(e => e.group === g));
+  $("pickgroups").innerHTML = ["All", ...present].map(g => '<button type="button" role="tab" data-g="' + g + '" aria-selected="' + (g === pickGroup) + '">' + g + "</button>").join("");
   let h = "";
   if (q && !allEx().some(e => e.name.toLowerCase() === q)) h += '<button type="button" class="new" data-new="1">+ Create “' + esc($("pickq").value.trim()) + "”</button>";
-  h += list.map(e => '<button type="button" data-ex="' + esc(e.id) + '">' + esc(e.name) + "<small>" + esc(e.group) + "</small></button>").join("");
+  for (const g of [...GROUPS, ...new Set(pool.map(e => e.group).filter(g => !GROUPS.includes(g)))]) {
+    const items = pool.filter(e => e.group === g);
+    if (!items.length) continue;
+    h += "<h4>" + esc(g) + "</h4>" + items.map(e => '<button type="button" data-ex="' + esc(e.id) + '">' + esc(e.name) + "</button>").join("");
+  }
   $("picklist").innerHTML = h || '<div class="empty">No matches.</div>';
 }
-function pickExercise(cb) { pickCb = cb; $("pickq").value = ""; renderPick(); $("pick").showModal(); }
+$("pickgroups").addEventListener("click", e => { const b = e.target.closest("[data-g]"); if (b) { pickGroup = b.dataset.g; renderPick(); } });
+function pickExercise(cb) { pickCb = cb; pickGroup = "All"; $("pickq").value = ""; renderPick(); $("pick").showModal(); }
 $("pickq").addEventListener("input", renderPick);
 $("pickcancel").onclick = () => $("pick").close();
 $("picklist").addEventListener("click", e => {
